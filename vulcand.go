@@ -20,7 +20,7 @@ import (
 var (
 	RouteMatchers     = []string{"host", "path", "method", "header"}
 	DefaultMiddleware = map[string]string{
-		"forceSSL": `{
+		"redirect_ssl": `{
       "Priority": 1,
       "Type": "rewrite",
       "Middleware": {
@@ -315,9 +315,9 @@ type vMiddleware struct {
 const (
 	DefaultVulcanRoute = "Path(`/`)"
 
-	FrontendSettingsKey        = "frontendSettings"
-	BackendSettingsKey         = "backendSettings"
-	BackendTypeKey             = "backendType"
+	FrontendSettingsKey        = "frontend_settings"
+	BackendSettingsKey         = "backend_settings"
+	BackendTypeKey             = "backend_type"
 	CustomMiddlewareKeyPattern = `^romulus/middleware\.([^\.]+)`
 
 	websocket = "websocket"

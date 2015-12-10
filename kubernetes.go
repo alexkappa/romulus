@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/md5"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"k8s.io/kubernetes/pkg/api/endpoints"
 	"k8s.io/kubernetes/pkg/api/meta"
 	uapi "k8s.io/kubernetes/pkg/api/unversioned"
+	"k8s.io/kubernetes/pkg/apis/extensions"
 	"k8s.io/kubernetes/pkg/client/cache"
 	"k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/client/unversioned/clientcmd"
@@ -29,6 +31,7 @@ var (
 	resources      = map[string]runtime.Object{
 		"services":  &api.Service{},
 		"endpoints": &api.Endpoints{},
+		"ingress":   &extensions.Ingress{},
 	}
 )
 
@@ -163,6 +166,25 @@ func SetWatch(w Watcher, c cache.Getter, res string, sel map[string]string, resy
 	return framework.NewInformer(lw, obj, resync, handler)
 }
 
+func (k *kubeCache) getService(o runtime.Object) (*Service, error) {
+	key, er := cache.MetaNamespaceKeyFunc(o)
+	if er != nil {
+		return nil, er
+	}
+	obj, ok, er := k.GetByKey(key)
+	if er != nil {
+		return nil, er
+	}
+	if !ok {
+		return nil, nil
+	}
+	s, ok := obj.(*api.Service)
+	if !ok {
+		return nil, errors.New("Service cache returned non-Service object")
+	}
+	return s, nil
+}
+
 type Object interface {
 	runtime.Object
 }
@@ -171,6 +193,14 @@ type Watcher interface {
 	Add(obj interface{})
 	Delete(obj interface{})
 	Update(old, next interface{})
+}
+
+type kubeCache struct {
+	cache.Store
+}
+
+type Ingress struct {
+	extensions.Ingress
 }
 
 type Service struct {
@@ -193,6 +223,10 @@ type Metadata struct {
 }
 
 type Addresses map[int][]*url.URL
+
+func (i Ingress) String() string {
+	return fmt.Sprintf("Ingress(Name=%q, Namespace=%q)", i.Name, i.Namespace)
+}
 
 func (e Endpoints) String() string {
 	return fmt.Sprintf(`Endpoints(Name=%q, Namespace=%q)`, e.ObjectMeta.Name, e.ObjectMeta.Namespace)

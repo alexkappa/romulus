@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/net/context"
 	"k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/apis/extensions"
 	"k8s.io/kubernetes/pkg/client/cache"
 	"k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/controller/framework"
@@ -28,8 +29,8 @@ func newEngine(kubeapi, kubever string, insecure bool, sel map[string]string, lb
 		return nil, er
 	}
 	return &Engine{
-		cache:      &kubeCache{},
-		controller: &kubeController{},
+		cache:      kubeCache{},
+		controller: kubeController{},
 		lb:         lb,
 		kube:       k,
 		selector:   sel,
@@ -45,25 +46,43 @@ func (e *Engine) Start(resync time.Duration) error {
 		return fmt.Errorf("Failed to connect to loadbalancer: %v", er)
 	}
 
-	e.cache.service, e.controller.service = SetWatch(e, e.kube, serviceResource, e.selector, resync)
-	e.cache.endpoints, e.controller.endpoints = SetWatch(e, e.kube, endpointsResource, e.selector, resync)
-	// e.cache.service = scache
-	// e.cache.endpoints = ecache
+	// e.cache.service, e.controller.service = SetWatch(e, e.kube, serviceResource, e.selector, resync)
+	// e.cache.endpoints, e.controller.endpoints = SetWatch(e, e.kube, endpointsResource, e.selector, resync)
+	e.cache[ingressResource], e.controller[ingressResource] = SetWatch(
+		e, e.kube, ingressResource, e.selector, resync,
+	)
 
-	go e.controller.run(serviceResource, e.ctx)
-	go e.controller.run(endpointsResource, e.ctx)
+	go e.controller[ingressResource].Run(e.ctx.Done())
+	// go e.controller.run(serviceResource, e.ctx)
+	// go e.controller.run(endpointsResource, e.ctx)
 	return nil
 }
 
 func (e *Engine) Add(obj interface{}) {
 	var (
 		service   *Service
-		endpoints *Endpoints
+		ingress *Ingress
 	)
+
+	in, ok := obj.(*extensions.Ingress)
+	if !ok {
+		logger.Errorf("Got non-Ingress object in Ingress watch")
+		logger.Debugf("Object: %+v", obj)
+		return
+	}
+	ingress = &Ingress{*in}
+
+	logger.Debugf("Callback: Add %v", ingress)
+	svc, er := e.cache.
 
 	switch o := obj.(type) {
 	default:
 		logger.Debugf(spew.Sprintf("Other: %#v", o))
+		return
+	case *extensions.Ingress:
+		if er := e.addIngress(&Ingress{*o}); er != nil {
+			logger.Errorf("Add Ingress failed: %v", er)
+		}
 		return
 	case *api.Service:
 		service = &Service{*o}
@@ -136,6 +155,11 @@ func (e *Engine) Update(old, next interface{}) {
 	if er := e.add(service, endpoints); er != nil {
 		logger.Errorf("Add failed: %v", er)
 	}
+}
+
+func (e *Engine) addIngress(ing *Ingress) error {
+	ing.Spec.Backend.
+	return nil
 }
 
 func (e *Engine) add(svc *Service, en *Endpoints) error {
@@ -246,12 +270,16 @@ func (e *Engine) commit(fn upsertFunc) {
 	}
 }
 
+func (c *kubeCache) service() cache.Store   { return c["service"] }
+func (c *kubeCache) endpoints() cache.Store { return c["endpoints"] }
+func (c *kubeCache) ingress() cache.Store   { return c["ingress"] }
+
 func (c *kubeCache) getEndpoints(s *api.Service) (*api.Endpoints, error) {
 	key, er := cache.MetaNamespaceKeyFunc(s)
 	if er != nil {
 		return nil, er
 	}
-	obj, ok, er := c.endpoints.GetByKey(key)
+	obj, ok, er := c.endpoints().GetByKey(key)
 	if er != nil {
 		return nil, er
 	}
@@ -270,7 +298,7 @@ func (c *kubeCache) getService(e *api.Endpoints) (*api.Service, error) {
 	if er != nil {
 		return nil, er
 	}
-	obj, ok, er := c.service.GetByKey(key)
+	obj, ok, er := c.service().GetByKey(key)
 	if er != nil {
 		return nil, er
 	}
@@ -307,23 +335,13 @@ func (c *kubeController) requeue(resource string, obj interface{}) {
 // Engine is the main driver and handles kubernetes callbacks
 type Engine struct {
 	sync.Mutex
-	cache      *kubeCache
-	controller *kubeController
+	cache      kubeCache
+	controller kubeController
 	lb         LoadBalancer
 	kube       *unversioned.Client
 	selector   map[string]string
 	timeout    time.Duration
 	ctx        context.Context
-}
-
-type kubeCache struct {
-	service   cache.Store
-	endpoints cache.Store
-}
-
-type kubeController struct {
-	service   *framework.Controller
-	endpoints *framework.Controller
 }
 
 type upsertFunc func() error
@@ -332,6 +350,7 @@ const (
 	interval          = 50 * time.Millisecond
 	serviceResource   = "services"
 	endpointsResource = "endpoints"
+	ingressResource   = "ingress"
 )
 
 func doAdd(s *api.Service) bool {
