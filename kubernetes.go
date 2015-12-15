@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/net/context"
+
 	"github.com/albertrdixon/gearbox/logger"
 	"github.com/albertrdixon/gearbox/util"
 	"k8s.io/kubernetes/pkg/api"
@@ -131,24 +133,39 @@ func GetSrvID(u *url.URL, me *Metadata) string {
 	return strings.Join([]string{me.Namespace, me.Name, util.Hashf(md5.New(), u)[:hashLen]}, ".")
 }
 
-func SetWatch(w Watcher, c cache.Getter, res string, sel map[string]string, resync time.Duration) (cache.Store, *framework.Controller) {
+func createStore(kind string, sel map[string]string, resync time.Duration, ctx context.Context) (cache.Store, error) {
+	obj, ok := resources[kind]
+	if !ok {
+		return nil, fmt.Errorf("Object type %q not supported", kind)
+	}
+
+	store := cache.NewTTLStore(framework.DeletionHandlingMetaNamespaceKeyFunc, cacheTTL)
+	selector := selectorFromMap(sel)
+	lw := getListWatch(kind, selector)
+	cache.NewReflector(lw, obj, store, resync).RunUntil(ctx.Done())
+	return store, nil
+}
+
+func createController(w Watcher, c cache.Getter, res string, sel map[string]string, resync time.Duration) (cache.Store, *framework.Controller) {
 	obj, ok := resources[res]
 	if !ok {
 		return nil, nil
 	}
 
-	sl := labels.Everything()
-	for k, v := range sel {
-		if !strings.HasPrefix(k, "romulus/") {
-			k = "romulus/" + k
-		}
-		sl = sl.Add(k, labels.DoubleEqualsOperator, []string{v})
+	sl := selectorFromMap(sel)
+	handler := framework.ResourceEventHandlerFuncs{
+		AddFunc:    w.Add,
+		DeleteFunc: w.Delete,
+		UpdateFunc: w.Update,
 	}
+	return framework.NewInformer(getListWatch(res, sl), obj, resync, handler)
+}
 
-	lw := &cache.ListWatch{
+func getListWatch(resource string, selector labels.Selector) *cache.ListWatch {
+	return &cache.ListWatch{
 		ListFunc: func() (runtime.Object, error) {
-			return c.Get().Namespace(api.NamespaceAll).Resource(res).
-				LabelsSelectorParam(sl).FieldsSelectorParam(fields.Everything()).
+			return c.Get().Namespace(api.NamespaceAll).Resource(resource).
+				LabelsSelectorParam(selector).FieldsSelectorParam(fields.Everything()).
 				Do().Get()
 		},
 		WatchFunc: func(options uapi.ListOptions) (watch.Interface, error) {
@@ -157,21 +174,82 @@ func SetWatch(w Watcher, c cache.Getter, res string, sel map[string]string, resy
 				Param("resourceVersion", options.ResourceVersion).Watch()
 		},
 	}
-
-	handler := framework.ResourceEventHandlerFuncs{
-		AddFunc:    w.Add,
-		DeleteFunc: w.Delete,
-		UpdateFunc: w.Update,
-	}
-	return framework.NewInformer(lw, obj, resync, handler)
 }
 
-func (k *kubeCache) getService(o runtime.Object) (*Service, error) {
-	key, er := cache.MetaNamespaceKeyFunc(o)
+func selectorFromMap(m map[string]string) labels.Selector {
+	s := labels.Everything()
+	for k, v := range m {
+		if !strings.HasPrefix(k, RomulusKeyspace) {
+			k = strings.Join([]string{RomulusKeyspace, k}, "")
+		}
+		s = s.Add(k, labels.DoubleEqualsOperator, []string{v})
+	}
+	return s
+}
+
+func serviceListFromIngress(store *kubeCache, in *ingress) ([]*service, error) {
+	var (
+		host, path string
+		list       []*service
+		s          *api.Service
+		er         error
+	)
+
+	if in.Spec.Backend != nil {
+		list = make([]*service, 0, len(in.Spec.Rules+1))
+		s := &api.Service{Name: in.Spec.Backend.ServiceName, Namespace: in.Namespace}
+		if s, er = store.getService(o); er != nil {
+			return list, er
+		}
+		list = append(list, &service{backend})
+	} else {
+		list = make([]*service, 0, len(in.Spec.Rules))
+	}
+
+	for _, rule := range in.Spec.Rules {
+		host = rule.Host
+		for _, node := range rule.HTTP.Paths {
+			path = node.Path
+			s = &api.Service{Name: node.Backend.ServiceName, Namespace: in.Namespace}
+			if s, er = store.getService(s); er != nil {
+
+			}
+		}
+	}
+}
+
+func getServiceMeta(store *kubeCache, svc *api.Service) (*Metadata, error) {
+	s, er := store.getService(svc)
 	if er != nil {
 		return nil, er
 	}
-	obj, ok, er := k.GetByKey(key)
+	me, er := GetMetadata(s)
+	if er != nil {
+		return nil, er
+	}
+	return me, nil
+}
+
+func newDefaultService(name string, backend *extensions.IngressBackend) *service {
+	s := &service{}
+	if backend == nil {
+		return s
+	}
+
+	path := extensions.HTTPIngressPath{Backend: *backend}
+	s.IngressRuleValue.HTTP = &extensions.HTTPIngressRuleValue{
+		Paths: []extensions.HTTPIngressPath{path},
+	}
+	return s
+}
+
+func (k *kubeCache) getService(o runtime.Object) (*Service, error) {
+	// k.service.Get(o)
+	// key, er := cache.MetaNamespaceKeyFunc(o)
+	// if er != nil {
+	// 	return nil, er
+	// }
+	obj, ok, er := k.service.Get(o)
 	if er != nil {
 		return nil, er
 	}
@@ -196,12 +274,20 @@ type Watcher interface {
 }
 
 type kubeCache struct {
-	cache.Store
+	ingress, service cache.Store
 }
 
-type Ingress struct {
+type ingress struct {
 	extensions.Ingress
 }
+
+type service struct {
+	host, path  string
+	annotations map[string]string
+	backend     *api.Service
+}
+
+type serviceList []*service
 
 type Service struct {
 	api.Service
@@ -265,6 +351,8 @@ const (
 
 	RomulusKeyspace = "romulus/"
 	hashLen         = 8
+
+	cacheTTL = 48 * time.Hour
 )
 
 func LabelKeyf(bits ...string) string {

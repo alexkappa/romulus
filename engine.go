@@ -29,8 +29,7 @@ func newEngine(kubeapi, kubever string, insecure bool, sel map[string]string, lb
 		return nil, er
 	}
 	return &Engine{
-		cache:      kubeCache{},
-		controller: kubeController{},
+		cache:      &kubeCache{},
 		lb:         lb,
 		kube:       k,
 		selector:   sel,
@@ -46,21 +45,19 @@ func (e *Engine) Start(resync time.Duration) error {
 		return fmt.Errorf("Failed to connect to loadbalancer: %v", er)
 	}
 
-	// e.cache.service, e.controller.service = SetWatch(e, e.kube, serviceResource, e.selector, resync)
-	// e.cache.endpoints, e.controller.endpoints = SetWatch(e, e.kube, endpointsResource, e.selector, resync)
-	e.cache[ingressResource], e.controller[ingressResource] = SetWatch(
-		e, e.kube, ingressResource, e.selector, resync,
-	)
+	if e.cache.service, er := createStore(ServiceKind, e.selector, resync, e.ctx); er != nil {
+		return fmt.Errorf("Unable to create Service store: %v", er)
+	}
 
-	go e.controller[ingressResource].Run(e.ctx.Done())
-	// go e.controller.run(serviceResource, e.ctx)
-	// go e.controller.run(endpointsResource, e.ctx)
+	e.cache.ingress, e.controller = createController(e, e.kube, ingressResource, e.selector, resync)
+
+	go e.controller.Run(e.ctx.Done())
 	return nil
 }
 
 func (e *Engine) Add(obj interface{}) {
 	var (
-		service   *Service
+		service *Service
 		ingress *Ingress
 	)
 
@@ -73,7 +70,10 @@ func (e *Engine) Add(obj interface{}) {
 	ingress = &Ingress{*in}
 
 	logger.Debugf("Callback: Add %v", ingress)
-	svc, er := e.cache.
+
+	in.Spec
+	svc, er := e.cache.service.Get(api.Service{Name: in.S})
+	if 
 
 	switch o := obj.(type) {
 	default:
@@ -162,20 +162,21 @@ func (e *Engine) addIngress(ing *Ingress) error {
 	return nil
 }
 
-func (e *Engine) add(svc *Service, en *Endpoints) error {
+func (e *Engine) add(in *ingress) error {
 	e.Lock()
 	defer e.Unlock()
 
-	m, er := GetMetadata(&(svc.Service))
+	m, er := GetMetadata(&(in.Ingress))
 	if er != nil {
 		return er
 	}
+	if 
 
 	backend, er := e.lb.NewBackend(m)
 	if er != nil {
 		return er
 	}
-	addr := AddressesFromSubsets(en.Subsets)
+	addr := addressFromService()
 	srvs, er := e.lb.NewServers(addr, m)
 	if er != nil {
 		return er
@@ -336,7 +337,7 @@ func (c *kubeController) requeue(resource string, obj interface{}) {
 type Engine struct {
 	sync.Mutex
 	cache      kubeCache
-	controller kubeController
+	controller *framework.Controller
 	lb         LoadBalancer
 	kube       *unversioned.Client
 	selector   map[string]string
