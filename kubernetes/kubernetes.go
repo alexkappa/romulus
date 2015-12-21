@@ -33,7 +33,7 @@ var (
 	resources = map[string]runtime.Object{
 		"services":  &api.Service{},
 		"endpoints": &api.Endpoints{},
-		"ingress":   &extensions.Ingress{},
+		"ingresses": &extensions.Ingress{},
 	}
 )
 

@@ -213,5 +213,5 @@ const (
 	interval          = 50 * time.Millisecond
 	serviceResource   = "services"
 	endpointsResource = "endpoints"
-	ingressResource   = "ingress"
+	ingressResource   = "ingresses"
 )
