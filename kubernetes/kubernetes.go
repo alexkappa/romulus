@@ -209,7 +209,7 @@ const (
 
 	ServiceKind  = "service"
 	ServicesKind = "services"
-	IngressKind  = "ingress"
+	IngressKind  = "ingresses"
 )
 
 func ServiceReady(s *api.Service) bool {
