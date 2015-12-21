@@ -1,6 +1,10 @@
-package main
+package loadbalancer
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/timelinelabs/romulus/kubernetes"
+)
 
 var (
 	ErrUnexpectedFrontendType = errors.New("Frontend is of unexpected type")
@@ -8,19 +12,19 @@ var (
 )
 
 type LoadBalancer interface {
-	NewFrontend(meta *Metadata) (Frontend, error)
-	GetFrontend(meta *Metadata) (Frontend, error)
+	NewFrontend(svc *kubernetes.Service) (Frontend, error)
+	GetFrontend(svc *kubernetes.Service) (Frontend, error)
 	UpsertFrontend(fr Frontend) error
 	DeleteFrontend(fr Frontend) error
-	NewBackend(meta *Metadata) (Backend, error)
-	GetBackend(meta *Metadata) (Backend, error)
+	NewBackend(svc *kubernetes.Service) (Backend, error)
+	GetBackend(svc *kubernetes.Service) (Backend, error)
 	UpsertBackend(ba Backend) error
 	DeleteBackend(ba Backend) error
-	NewServers(addr Addresses, meta *Metadata) ([]Server, error)
-	GetServers(meta *Metadata) ([]Server, error)
+	NewServers(svc *kubernetes.Service) ([]Server, error)
+	GetServers(svc *kubernetes.Service) ([]Server, error)
 	UpsertServer(ba Backend, srv Server) error
 	DeleteServer(ba Backend, srv Server) error
-	NewMiddlewares(meta *Metadata) ([]Middleware, error)
+	NewMiddlewares(svc *kubernetes.Service) ([]Middleware, error)
 
 	Kind() string
 	Status() error

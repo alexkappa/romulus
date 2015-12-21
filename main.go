@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/albertrdixon/gearbox/logger"
+	"github.com/timelinelabs/romulus/loadbalancer"
+	"github.com/timelinelabs/romulus/loadbalancer/vulcand"
 	"golang.org/x/net/context"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
@@ -41,7 +43,7 @@ func main() {
 	if er != nil {
 		logger.Fatalf(er.Error())
 	}
-	ng, er := newEngine((*kubeAPI).String(), *kubeVer, *kubeSec, *selector, lb, ctx)
+	ng, er := newEngine((*kubeAPI).String(), *kubeVer, *kubeSec, lb, ctx)
 	if er != nil {
 		logger.Fatalf(er.Error())
 	}
@@ -61,12 +63,12 @@ func main() {
 	}
 }
 
-func getLBProvider(kind string, c context.Context) (LoadBalancer, error) {
+func getLBProvider(kind string, c context.Context) (loadbalancer.LoadBalancer, error) {
 	switch kind {
 	default:
 		return nil, errors.New("Unknown LB type")
 	case "vulcand":
-		lb, er := newVulcanLB((*vulcanAPI).String(), nil, c)
+		lb, er := vulcand.New((*vulcanAPI).String(), nil, c)
 		if er != nil {
 			return nil, er
 		}

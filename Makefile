@@ -47,7 +47,7 @@ build:
 
 build-image:
 	@echo "==> Building linux binary"
-	@ GOOS=linux CGO_ENABLED=0 godep go build -a -installsuffix cgo -ldflags $(LDFLAGS) -o bin/$(EXECUTABLE)-linux *.go
+	@GOOS=linux CGO_ENABLED=0 godep go build -a -installsuffix cgo -ldflags $(LDFLAGS) -o bin/$(EXECUTABLE)-linux *.go
 	@echo "==> Building docker image '$(IMAGE)'"
 	@docker build -t $(IMAGE) .
 
