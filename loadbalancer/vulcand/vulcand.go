@@ -9,6 +9,7 @@ import (
 
 	"github.com/albertrdixon/gearbox/logger"
 	"github.com/albertrdixon/gearbox/url"
+	"github.com/bradfitz/slice"
 	"github.com/timelinelabs/vulcand/api"
 	"github.com/timelinelabs/vulcand/engine"
 	"github.com/timelinelabs/vulcand/plugin"
@@ -79,11 +80,15 @@ func (v *Vulcan) NewBackend(svc *kubernetes.Service) (loadbalancer.Backend, erro
 }
 
 func (v *Vulcan) NewServers(svc *kubernetes.Service) ([]loadbalancer.Server, error) {
-	s, er := engine.NewServer(svc.SrvID, svc.Backend.String())
-	if er != nil {
-		return []loadbalancer.Server{}, er
+	list := make([]loadbalancer.Server, 0, 1)
+	for _, server := range svc.Backends {
+		s, er := engine.NewServer(server.ID, server.URL().String())
+		if er != nil {
+			return list, er
+		}
+		list = append(list, newServer(s))
 	}
-	return []loadbalancer.Server{newServer(s)}, nil
+	return list, nil
 }
 
 func (v *Vulcan) NewMiddlewares(svc *kubernetes.Service) ([]loadbalancer.Middleware, error) {
@@ -188,24 +193,26 @@ func (v *Vulcan) UpsertServer(backend loadbalancer.Backend, srv loadbalancer.Ser
 	return v.Client.UpsertServer(engine.BackendKey{Id: backend.GetID()}, srv.(*server).Server, 0)
 }
 
-func (v *Vulcan) GetFrontend(svc *kubernetes.Service) (loadbalancer.Frontend, error) {
-	f, er := v.Client.GetFrontend(engine.FrontendKey{Id: svc.ID})
+func (v *Vulcan) GetFrontend(frontendID string) (loadbalancer.Frontend, error) {
+	f, er := v.Client.GetFrontend(engine.FrontendKey{Id: frontendID})
 	if er != nil {
 		return nil, er
 	}
 	return newFrontend(f), nil
 }
 
-func (v *Vulcan) GetBackend(svc *kubernetes.Service) (loadbalancer.Backend, error) {
-	b, er := v.Client.GetBackend(engine.BackendKey{Id: svc.ID})
+func (v *Vulcan) GetBackend(backendID string) (loadbalancer.Backend, error) {
+	logger.Debugf("Lookup Backend: %q", backendID)
+	b, er := v.Client.GetBackend(engine.BackendKey{Id: backendID})
 	if er != nil {
+		logger.Debugf("Lookup failed: %v", er)
 		return nil, er
 	}
 	return newBackend(b), nil
 }
 
-func (v *Vulcan) GetServers(svc *kubernetes.Service) ([]loadbalancer.Server, error) {
-	srvs, er := v.Client.GetServers(engine.BackendKey{Id: svc.ID})
+func (v *Vulcan) GetServers(backendID string) ([]loadbalancer.Server, error) {
+	srvs, er := v.Client.GetServers(engine.BackendKey{Id: backendID})
 	if er != nil {
 		return []loadbalancer.Server{}, er
 	}
@@ -307,29 +314,38 @@ const (
 	Enabled   = "enabled"
 )
 
-func buildRoute(rt kubernetes.Route) string {
-	if rt.Host == "" && rt.Path == "" && rt.Method == "" && len(rt.Headers) < 1 {
+func buildRoute(rt *kubernetes.Route) string {
+	if rt.Empty() {
 		return DefaultRoute
 	}
 
 	bits := []string{}
-	if rt.Host != "" {
-		bits = append(bits, fmt.Sprintf("Host(`%s`)", rt.Host))
+	for k, v := range rt.GetParts() {
+		bits = append(bits, fmt.Sprintf("%s(`%s`)", strings.Title(k), v))
 	}
-	if rt.Path != "" {
-		bits = append(bits, fmt.Sprintf("Path(`%s`)", rt.Path))
-	}
-	if rt.Method != "" {
-		bits = append(bits, fmt.Sprintf("Method(`%s`)", rt.Method))
-	}
-	for k, v := range rt.Headers {
+	for k, v := range rt.GetHeader() {
 		bits = append(bits, fmt.Sprintf("Header(`%s`, `%s`)", k, v))
 	}
+	slice.Sort(bits, func(i, j int) bool {
+		return bits[i] < bits[j]
+	})
 	expr := strings.Join(bits, " && ")
 	if len(expr) < 1 || !route.IsValid(expr) {
+		logger.Debugf("Provided route not valid: %s", expr)
 		return DefaultRoute
 	}
 	return expr
+}
+
+func isRegexp(r string) bool {
+	if !strings.HasPrefix(r, "/") || !strings.HasSuffix(r, "/") {
+		return false
+	}
+	if _, er := regexp.Compile(r); er != nil {
+		logger.Debugf("Regexp compile failure: %v", er)
+		return false
+	}
+	return true
 }
 
 func validVulcanURL(u *url.URL) bool {

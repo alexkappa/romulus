@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -9,139 +10,295 @@ import (
 	"github.com/cenkalti/backoff"
 
 	"golang.org/x/net/context"
+	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/apis/extensions"
-	"k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/controller/framework"
+	"k8s.io/kubernetes/pkg/util/intstr"
 
 	"github.com/timelinelabs/romulus/kubernetes"
 	"github.com/timelinelabs/romulus/loadbalancer"
 )
 
-var (
-	upsertBackoff = backoff.NewExponentialBackOff()
-	upsertTimeout = 10 * time.Second
-)
-
-func newEngine(kubeapi, kubever string, insecure bool, lb loadbalancer.LoadBalancer, ctx context.Context) (*Engine, error) {
-	k, er := kubernetes.NewClient(kubeapi, kubever, insecure)
+func newEngine(kubeapi, user, pass string, insecure bool, lb loadbalancer.LoadBalancer, timeout time.Duration, ctx context.Context) (*Engine, error) {
+	kubernetes.Keyspace = "romulus/"
+	k1, er := kubernetes.NewClient(kubeapi, user, pass, insecure)
 	if er != nil {
 		return nil, er
 	}
+	k2, er := kubernetes.NewExtensionsClient(kubeapi, user, pass, insecure)
+	if er != nil {
+		return nil, er
+	}
+	back := backoff.NewExponentialBackOff()
+	back.MaxElapsedTime = timeout
 	return &Engine{
-		cache: &kubernetes.KubeCache{},
-		lb:    lb,
-		kube:  k,
-		ctx:   ctx,
+		Context:      ctx,
+		BackOff:      back,
+		LoadBalancer: lb,
+		cache:        &kubernetes.KubeCache{},
+		client:       &kubernetes.Client{Client: k1, ExtensionsClient: k2},
 	}, nil
 }
 
-func (e *Engine) Start(resync time.Duration) error {
-	var er error
-	if er = kubernetes.Status(e.kube); er != nil {
+func (e *Engine) Start(selector kubernetes.Selector, resync time.Duration) error {
+	var (
+		er               error
+		service, ingress *framework.Controller
+	)
+	if er = kubernetes.Status(e.client); er != nil {
 		return fmt.Errorf("Failed to connect to kubernetes: %v", er)
 	}
-	if er = e.lb.Status(); er != nil {
+	if er = e.LoadBalancer.Status(); er != nil {
 		return fmt.Errorf("Failed to connect to loadbalancer: %v", er)
 	}
 
-	if e.cache.Service, er = kubernetes.CreateStore(kubernetes.ServicesKind, e.kube, resync, e.ctx); er != nil {
-		return fmt.Errorf("Unable to create Service store: %v", er)
+	e.Lock()
+	defer e.Unlock()
+
+	logger.Debugf("Setting up Service cache")
+	if e.cache.Service, er = kubernetes.CreateStore(kubernetes.ServicesKind, e.client.Client, selector, resync, e.Context); er != nil {
+		return fmt.Errorf("Unable to create Service cache: %v", er)
 	}
 
-	e.cache.Ingress, e.controller = kubernetes.CreateController(kubernetes.IngressKind, e, e.kube, resync)
-	go e.controller.Run(e.ctx.Done())
+	logger.Debugf("Setting up Service and Ingress callbacks")
+	_, service = kubernetes.CreateUpdateController(kubernetes.ServicesKind, e, e.client.Client, selector, resync)
+	e.cache.Ingress, ingress = kubernetes.CreateFullController(kubernetes.IngressKind, e, e.client.ExtensionsClient, selector, resync)
+
+	go service.Run(e.Done())
+	time.Sleep(3 * time.Millisecond)
+	go ingress.Run(e.Done())
 	return nil
 }
 
 func (e *Engine) Add(obj interface{}) {
-	in, ok := obj.(*extensions.Ingress)
-	if !ok {
-		logger.Errorf("Got non-Ingress object in Ingress watch")
-		logger.Debugf("Object: %+v", obj)
-		return
-	}
-
-	logger.Debugf("Callback: Add %v", kubernetes.KubeIngress(*in))
-	if er := e.add(in); er != nil {
-		logger.Errorf("Add failed: %v", er)
+	switch o := obj.(type) {
+	default:
+		logger.Errorf("Got unknown type in Add callback: %+v", o)
+	case *extensions.Ingress:
+		logger.Debugf("[Callback] Add %v", kubernetes.KubeIngress(*o))
+		if er := e.addFrontend(o); er != nil {
+			logger.Errorf("Add %v failed: %v", kubernetes.KubeIngress(*o), er)
+		}
+	case *api.Service:
+		logger.Debugf("[Callback] Add %v", kubernetes.KubeService(*o))
+		if er := e.addBackends(o); er != nil {
+			logger.Errorf("Add %v failed: %v", kubernetes.KubeService(*o), er)
+		}
 	}
 }
 
 func (e *Engine) Delete(obj interface{}) {
-	in, ok := obj.(*extensions.Ingress)
-	if !ok {
-		logger.Errorf("Got non-Ingress object in Ingress watch")
-		logger.Debugf("Object: %+v", obj)
-		return
-	}
-
-	logger.Debugf("Callback: Delete %v", kubernetes.KubeIngress(*in))
-	if er := e.del(in); er != nil {
-		logger.Errorf("Delete failed: %v", er)
+	switch o := obj.(type) {
+	default:
+		logger.Errorf("Got unknown type in Add callback: %+v", o)
+	case *extensions.Ingress:
+		logger.Debugf("[Callback] Delete %v", kubernetes.KubeIngress(*o))
+		if er := e.deleteFrontend(o); er != nil {
+			logger.Errorf("Delete %v failed: %v", kubernetes.KubeIngress(*o), er)
+		}
+	case *api.Service:
+		logger.Debugf("[Callback] Delete %v", kubernetes.KubeService(*o))
+		if er := e.deleteBackends(o); er != nil {
+			logger.Errorf("Delete %v failed: %v", kubernetes.KubeService(*o), er)
+		}
 	}
 }
 
 func (e *Engine) Update(old, next interface{}) {
-	in, ok := next.(*extensions.Ingress)
-	if !ok {
-		logger.Errorf("Got non-Ingress object in Ingress watch")
-		logger.Debugf("Object: %+v", next)
-		return
-	}
-
-	logger.Debugf("Callback: Update %v", kubernetes.KubeIngress(*in))
-	if er := e.add(in); er != nil {
-		logger.Errorf("Update failed: %v", er)
+	switch o := next.(type) {
+	default:
+		logger.Errorf("Got unknown type in Update callback: %+v", o)
+	case *extensions.Ingress:
+		prev, ok := old.(*extensions.Ingress)
+		if !ok {
+			logger.Errorf("Got unknown type in Update callback: %+v", old)
+			return
+		}
+		logger.Debugf("[Callback] Update %v", kubernetes.KubeIngress(*o))
+		if er := e.updateFrontend(prev, o); er != nil {
+			logger.Errorf("Update %v failed: %v", kubernetes.KubeIngress(*o), er)
+		}
+	case *api.Service:
+		prev, ok := old.(*api.Service)
+		if !ok {
+			logger.Errorf("Got unknown type in Update callback: %+v", old)
+			return
+		}
+		logger.Debugf("[Callback] Update %v", kubernetes.KubeService(*o))
+		if er := e.updateBackends(prev, o); er != nil {
+			logger.Errorf("Update %v failed: %v", kubernetes.KubeService(*o), er)
+		}
 	}
 }
 
-func (e *Engine) add(in *extensions.Ingress) error {
+func (e *Engine) deleteBackends(s *api.Service) error {
 	e.Lock()
 	defer e.Unlock()
 
-	services := kubernetes.ServicesFromIngress(e.cache, in)
-	if len(services) < 1 {
-		return fmt.Errorf("No services to add from %v", kubernetes.KubeIngress(*in))
+	backends, er := gatherBackendsFromService(e, s)
+	if er != nil {
+		return er
 	}
 
-	for _, svc := range services {
-		backend, er := e.lb.NewBackend(svc)
-		if er != nil {
-			return er
+	return e.commit(func() error {
+		for _, backend := range backends {
+			logger.Infof("Deleting %v", backend)
+			if er := e.DeleteBackend(backend); er != nil {
+				return er
+			}
 		}
-		srvs, er := e.lb.NewServers(svc)
+		return nil
+	})
+}
+
+func (e *Engine) updateBackends(prev, next *api.Service) error {
+	e.Lock()
+	defer e.Unlock()
+
+	if !api.IsServiceIPSet(next) {
+		return errors.New("Service IP not set")
+	}
+
+	logger.Debugf("Parse prev version: %v", kubernetes.KubeService(*prev))
+	prevBackends, _ := gatherBackendsFromService(e, prev)
+	logger.Debugf("[%v] Previous Backends: %v", kubernetes.KubeService(*prev), prevBackends)
+	logger.Debugf("Parse new version: %v", kubernetes.KubeService(*next))
+	nextBackends, er := gatherBackendsFromService(e, next)
+	logger.Debugf("[%v] New Backends: %v", kubernetes.KubeService(*next), nextBackends)
+	if er != nil {
+		return er
+	}
+	prevBackendsMap := map[string]loadbalancer.Backend{}
+	for _, b := range prevBackends {
+		prevBackendsMap[b.GetID()] = b
+	}
+	logger.Debugf("Backend map: %v", prevBackendsMap)
+
+	return e.commit(func() error {
+		for _, backend := range nextBackends {
+			logger.Infof("Upserting %v", backend)
+			if er := e.UpsertBackend(backend); er != nil {
+				return er
+			}
+			logger.Debugf("Removing %v from map (id=%q)", backend, backend.GetID())
+			delete(prevBackendsMap, backend.GetID())
+		}
+		logger.Debugf("Backend map: %v", prevBackendsMap)
+		for _, backend := range prevBackendsMap {
+			logger.Infof("Removing %v", backend)
+			if er := e.DeleteBackend(backend); er != nil {
+				logger.Warnf("Failed to remove %v: %v", backend, er)
+			}
+		}
+		return nil
+	})
+}
+
+func (e *Engine) addBackends(s *api.Service) error {
+	e.Lock()
+	defer e.Unlock()
+
+	if !api.IsServiceIPSet(s) {
+		return errors.New("Service IP not set")
+	}
+
+	backends, er := gatherBackendsFromService(e, s)
+	logger.Debugf("Backends: %v", backends)
+	if er != nil {
+		return er
+	}
+
+	return e.commit(func() error {
+		for _, backend := range backends {
+			logger.Infof("Upserting %v", backend)
+			if er := e.UpsertBackend(backend); er != nil {
+				return er
+			}
+		}
+		return nil
+	})
+}
+
+func gatherBackendsFromService(e *Engine, s *api.Service) ([]loadbalancer.Backend, error) {
+	var backends = []loadbalancer.Backend{}
+
+	logger.Debugf("[%v] Gathering Backends", kubernetes.KubeService(*s))
+	for _, svcPort := range s.Spec.Ports {
+		logger.Debugf(`[%v] Working on Port(name="%s", port=%d)`, kubernetes.KubeService(*s), svcPort.Name, svcPort.Port)
+		service, ok := e.FindService(svcPort, s.ObjectMeta)
+		if !ok {
+			continue
+		}
+
+		id := kubernetes.ServerID(s.Spec.ClusterIP, svcPort.Port, s.ObjectMeta)
+		service.AddBackend(id, "http", s.Spec.ClusterIP, svcPort.Port)
+		logger.Debugf("Found Service: %v", service)
+
+		backend, er := e.NewBackend(service)
 		if er != nil {
-			return er
+			return backends, er
+		}
+		logger.Debugf("Created Backend: %v", backend)
+
+		srvs, er := e.NewServers(service)
+		if er != nil {
+			return backends, er
 		}
 		for i := range srvs {
+			logger.Debugf("Adding Server: %v", srvs[i])
 			backend.AddServer(srvs[i])
 		}
-
-		frontend, er := e.lb.NewFrontend(svc)
-		if er != nil {
-			return er
-		}
-		mids, er := e.lb.NewMiddlewares(svc)
-		if er != nil {
-			return er
-		}
-		for i := range mids {
-			frontend.AddMiddleware(mids[i])
-		}
-
-		e.commit(func() error {
-			logger.Infof("Upserting %v", backend)
-			if er := e.lb.UpsertBackend(backend); er != nil {
-				return er
-			}
-			logger.Infof("Upserting %v", frontend)
-			return e.lb.UpsertFrontend(frontend)
-		})
+		backends = append(backends, backend)
 	}
-	return nil
+	return backends, nil
 }
 
-func (e *Engine) del(in *extensions.Ingress) error {
+func (e *Engine) FindService(port api.ServicePort, meta api.ObjectMeta) (*kubernetes.Service, bool) {
+	var id string
+
+	if port.Name != "" {
+		id = kubernetes.ServiceID(meta, intstr.FromString(port.Name))
+		if _, er := e.GetBackend(id); er == nil {
+			return kubernetes.NewService(id, meta), true
+		}
+	}
+
+	id = kubernetes.ServiceID(meta)
+	if _, er := e.GetBackend(id); er == nil {
+		return kubernetes.NewService(id, meta), true
+	}
+	return nil, false
+}
+
+func (e *Engine) updateFrontend(old, next *extensions.Ingress) error {
+	e.Lock()
+	defer e.Unlock()
+
+	oldSVCs := kubernetes.ServicesFromIngress(e.cache, old)
+	add := kubernetes.ServicesFromIngress(e.cache, next)
+	if len(add) < 1 {
+		return deleteServices(e, oldSVCs)
+	}
+
+	oldSVCmap := make(map[string]*kubernetes.Service, len(oldSVCs))
+	for i := range oldSVCs {
+		oldSVCmap[oldSVCs[i].UID] = oldSVCs[i]
+	}
+
+	del := []*kubernetes.Service{}
+	for _, s2 := range add {
+		if s1, ok := oldSVCmap[s2.UID]; ok && s1.ID != s2.ID {
+			del = append(del, s1)
+		}
+	}
+
+	if er := addServices(e, add); er != nil {
+		return er
+	}
+	return deleteServices(e, del)
+}
+
+func (e *Engine) addFrontend(in *extensions.Ingress) error {
 	e.Lock()
 	defer e.Unlock()
 
@@ -150,45 +307,35 @@ func (e *Engine) del(in *extensions.Ingress) error {
 		return fmt.Errorf("No services to add from %v", kubernetes.KubeIngress(*in))
 	}
 
-	for _, svc := range services {
-		backend, er := e.lb.NewBackend(svc)
-		if er != nil {
-			return er
-		}
-		frontend, er := e.lb.NewFrontend(svc)
-		if er != nil {
-			return er
-		}
-
-		e.commit(func() error {
-			logger.Infof("Removing %v", frontend)
-			if er := e.lb.DeleteFrontend(frontend); er != nil {
-				return er
-			}
-			logger.Infof("Removing %v", backend)
-			return e.lb.DeleteBackend(backend)
-		})
-	}
-	return nil
+	return addServices(e, services)
 }
 
-func (e *Engine) commit(fn upsertFunc) {
-	upsertBackoff.MaxElapsedTime = upsertTimeout
-	upsertBackoff.Reset()
+func (e *Engine) deleteFrontend(in *extensions.Ingress) error {
+	e.Lock()
+	defer e.Unlock()
 
+	services := kubernetes.ServicesFromIngress(e.cache, in)
+	if len(services) < 1 {
+		return fmt.Errorf("No services to add from %v", kubernetes.KubeIngress(*in))
+	}
+
+	return deleteServices(e, services)
+}
+
+func (e *Engine) commit(fn upsertFunc) error {
+	e.Reset()
 	for {
 		select {
-		case <-e.ctx.Done():
-			return
+		case <-e.Done():
+			return nil
 		default:
-			duration := upsertBackoff.NextBackOff()
+			duration := e.NextBackOff()
 			if duration == backoff.Stop {
-				logger.Errorf("Timed out trying to commit changes to loadbalancer")
-				return
+				return errors.New("Timed out trying to commit changes to loadbalancer")
 			}
 			er := fn()
 			if er == nil {
-				return
+				return er
 			}
 			logger.Warnf("Commit failed, retry in %v: %v", duration, er)
 			time.Sleep(duration)
@@ -196,15 +343,92 @@ func (e *Engine) commit(fn upsertFunc) {
 	}
 }
 
+func addServices(e *Engine, services []*kubernetes.Service) error {
+	backends := make([]loadbalancer.Backend, 0, len(services))
+	frontends := make([]loadbalancer.Frontend, 0, len(services))
+	for _, svc := range services {
+		logger.Debugf("Working on %v", svc)
+		backend, er := e.NewBackend(svc)
+		if er != nil {
+			return er
+		}
+		srvs, er := e.NewServers(svc)
+		if er != nil {
+			return er
+		}
+		for i := range srvs {
+			backend.AddServer(srvs[i])
+		}
+		logger.Debugf("Created new object: %v", backend)
+		backends = append(backends, backend)
+
+		frontend, er := e.NewFrontend(svc)
+		if er != nil {
+			return er
+		}
+		mids, er := e.NewMiddlewares(svc)
+		if er != nil {
+			return er
+		}
+		for i := range mids {
+			frontend.AddMiddleware(mids[i])
+		}
+		frontends = append(frontends, frontend)
+		logger.Debugf("Created new object: %v", frontend)
+	}
+
+	return e.commit(func() error {
+		for _, backend := range backends {
+			logger.Infof("Upserting %v", backend)
+			if er := e.UpsertBackend(backend); er != nil {
+				return er
+			}
+		}
+		for _, frontend := range frontends {
+			logger.Infof("Upserting %v", frontend)
+			if er := e.UpsertFrontend(frontend); er != nil {
+				return er
+			}
+		}
+		return nil
+	})
+}
+
+func deleteServices(e *Engine, services []*kubernetes.Service) error {
+	for _, svc := range services {
+		backend, er := e.NewBackend(svc)
+		if er != nil {
+			return er
+		}
+		frontend, er := e.NewFrontend(svc)
+		if er != nil {
+			return er
+		}
+
+		fn := func() error {
+			logger.Infof("Removing %v", frontend)
+			if er := e.DeleteFrontend(frontend); er != nil {
+				return er
+			}
+			logger.Infof("Removing %v", backend)
+			return e.DeleteBackend(backend)
+		}
+		if er := e.commit(fn); er != nil {
+			return er
+		}
+	}
+	return nil
+}
+
 // Engine is the main driver and handles kubernetes callbacks
 type Engine struct {
 	sync.Mutex
-	cache      *kubernetes.KubeCache
-	controller *framework.Controller
-	lb         loadbalancer.LoadBalancer
-	kube       *unversioned.Client
-	timeout    time.Duration
-	ctx        context.Context
+	backoff.BackOff
+	context.Context
+	loadbalancer.LoadBalancer
+	cache *kubernetes.KubeCache
+	// controller *framework.Controller
+	client *kubernetes.Client
 }
 
 type upsertFunc func() error

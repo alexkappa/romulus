@@ -35,6 +35,10 @@
 			"Rev": "aea32c919a18e5ef4537bbd283ff29594b1b0165"
 		},
 		{
+			"ImportPath": "github.com/bradfitz/slice",
+			"Rev": "a665b5dbaad5fc7474c1193c67ed138df1e1b0e7"
+		},
+		{
 			"ImportPath": "github.com/cenkalti/backoff",
 			"Rev": "4dc77674aceaabba2c7e3da25d4c823edfb73f99"
 		},
@@ -70,21 +74,6 @@
 			"ImportPath": "github.com/docker/go-units",
 			"Comment": "v0.1.0-9-g954fed0",
 			"Rev": "954fed01cc617c55d838fa2230073f2cb17386c8"
-		},
-		{
-			"ImportPath": "github.com/docker/libcontainer/cgroups",
-			"Comment": "v2.2.1-24-g69f0977",
-			"Rev": "69f09770f9276429ffd1b489525a25ac37b82067"
-		},
-		{
-			"ImportPath": "github.com/docker/libcontainer/configs",
-			"Comment": "v2.2.1-24-g69f0977",
-			"Rev": "69f09770f9276429ffd1b489525a25ac37b82067"
-		},
-		{
-			"ImportPath": "github.com/docker/libcontainer/system",
-			"Comment": "v2.2.1-24-g69f0977",
-			"Rev": "69f09770f9276429ffd1b489525a25ac37b82067"
 		},
 		{
 			"ImportPath": "github.com/emicklei/go-restful",
@@ -214,6 +203,21 @@
 		{
 			"ImportPath": "github.com/matttproud/golang_protobuf_extensions/pbutil",
 			"Rev": "d0c3fe89de86839aecf2e0579c40ba3bb336a453"
+		},
+		{
+			"ImportPath": "github.com/opencontainers/runc/libcontainer/cgroups",
+			"Comment": "v0.0.6-10-g9d6ce71",
+			"Rev": "9d6ce7168a4286ad75fd3fa5d558ff42f7661ae0"
+		},
+		{
+			"ImportPath": "github.com/opencontainers/runc/libcontainer/configs",
+			"Comment": "v0.0.6-10-g9d6ce71",
+			"Rev": "9d6ce7168a4286ad75fd3fa5d558ff42f7661ae0"
+		},
+		{
+			"ImportPath": "github.com/opencontainers/runc/libcontainer/system",
+			"Comment": "v0.0.6-10-g9d6ce71",
+			"Rev": "9d6ce7168a4286ad75fd3fa5d558ff42f7661ae0"
 		},
 		{
 			"ImportPath": "github.com/pborman/uuid",

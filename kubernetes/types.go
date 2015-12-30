@@ -2,13 +2,15 @@ package kubernetes
 
 import (
 	"fmt"
-	"net/url"
 	"strings"
+
+	"github.com/albertrdixon/gearbox/url"
+	"github.com/bradfitz/slice"
 
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/apis/extensions"
 	"k8s.io/kubernetes/pkg/client/cache"
-	"k8s.io/kubernetes/pkg/util/intstr"
+	"k8s.io/kubernetes/pkg/client/unversioned"
 )
 
 type watcher interface {
@@ -18,28 +20,60 @@ type watcher interface {
 }
 
 type Service struct {
-	Route
-	ID, SrvID   string
+	*Route
+	ID          string
 	Annotations map[string]string
-	Backend     *url.URL
+	Backends    []*Server
+	UID         string
 }
 
-func newService(port intstr.IntOrString, backend *api.Service) *Service {
-	svc := &Service{
-		ID:          getID(backend.ObjectMeta),
-		Route:       Route{Headers: make(map[string]string)},
-		Annotations: make(map[string]string),
+func NewService(id string, meta api.ObjectMeta) *Service {
+	return &Service{
+		ID:          id,
+		Route:       newRoute(),
+		Annotations: meta.Annotations,
+		UID:         string(meta.UID),
+		Backends:    make([]*Server, 0, 1),
 	}
-	if port.String() != "" {
-		svc.SetBackend(port, backend)
-	}
-	return svc
+}
+
+type Server struct {
+	ID, Scheme, IP string
+	Port           int
+}
+
+func (s *Server) URL() *url.URL {
+	ur, _ := url.Parse(fmt.Sprintf("%s://%s:%d", s.Scheme, s.IP, s.Port))
+	return ur
 }
 
 type Route struct {
-	Host, Path, Method string
-	Headers            map[string]string
+	Header map[string]string
+	Parts  map[string]string
 }
+
+func newRoute() *Route {
+	return &Route{Parts: make(map[string]string), Header: make(map[string]string)}
+}
+
+func (r *Route) AddHost(host string)            { r.Parts["host"] = host }
+func (r *Route) AddPath(path string)            { r.Parts["path"] = path }
+func (r *Route) AddMethod(method string)        { r.Parts["method"] = strings.ToUpper(method) }
+func (r *Route) AddHeader(header, value string) { r.Header[header] = value }
+func (r *Route) GetParts() map[string]string    { return r.Parts }
+func (r *Route) GetHeader() map[string]string   { return r.Header }
+
+type serviceSorter struct {
+	services []*Service
+	sorter   func(s1, s2 *Service) bool
+}
+
+type Client struct {
+	*unversioned.Client
+	*unversioned.ExtensionsClient
+}
+
+type Selector map[string]string
 
 type KubeCache struct {
 	Ingress, Service cache.Store
@@ -57,22 +91,23 @@ func (s KubeService) String() string {
 }
 
 func (s Service) String() string {
-	return fmt.Sprintf("Service(backend=%v, route=%v, meta=%v)", s.Backend, s.Route, s.Annotations)
+	return fmt.Sprintf("Service(backends=%v, route=%v, meta=%v)", s.Backends, s.Route, s.Annotations)
 }
 
 func (r Route) String() string {
 	rt := []string{}
-	if r.Host != "" {
-		rt = append(rt, fmt.Sprintf("host=%s", r.Host))
+	for k, v := range r.Parts {
+		rt = append(rt, fmt.Sprintf("%s(`%s`)", strings.Title(k), v))
 	}
-	if r.Path != "" {
-		rt = append(rt, fmt.Sprintf("path=%s", r.Path))
+	for k, v := range r.Header {
+		rt = append(rt, fmt.Sprintf("Header(`%s`, `%s`)", k, v))
 	}
-	if r.Method != "" {
-		rt = append(rt, fmt.Sprintf("method=%s", r.Method))
-	}
-	if len(r.Headers) > 0 {
-		rt = append(rt, fmt.Sprintf("headers=%v", r.Headers))
-	}
-	return fmt.Sprintf("Route(%s)", strings.Join(rt, ", "))
+	slice.Sort(rt, func(i, j int) bool {
+		return rt[i] < rt[j]
+	})
+	return fmt.Sprintf("Route(%s)", strings.Join(rt, " && "))
+}
+
+func (s Server) String() string {
+	return fmt.Sprintf(`Server(url="%v")`, s.URL())
 }

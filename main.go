@@ -22,6 +22,8 @@ var (
 
 	kubeAPI   = ro.Flag("kube-api", "URL for kubernetes api").Short('k').Default("http://127.0.0.1:8080").OverrideDefaultFromEnvar("KUBE_API").URL()
 	kubeVer   = ro.Flag("kube-api-ver", "kubernetes api version").Default("v1").OverrideDefaultFromEnvar("KUBE_API_VER").String()
+	kubeUser  = ro.Flag("kube-user", "kubernetes username").String()
+	kubePass  = ro.Flag("kube-pass", "kubernetes password").String()
 	kubeSec   = ro.Flag("kube-insecure", "Run kubernetes client in insecure mode").OverrideDefaultFromEnvar("KUBE_INSECURE").Bool()
 	selector  = ro.Flag("svc-selector", "service selectors. Leave blank for Everything(). Form: key=value").Short('s').PlaceHolder("key=value[,key=value]").OverrideDefaultFromEnvar("SVC_SELECTOR").StringMap()
 	provider  = ro.Flag("provider", "LoadBalancer provider").Short('p').Default("vulcand").Enum(lbs...)
@@ -43,12 +45,12 @@ func main() {
 	if er != nil {
 		logger.Fatalf(er.Error())
 	}
-	ng, er := newEngine((*kubeAPI).String(), *kubeVer, *kubeSec, lb, ctx)
+	ng, er := newEngine((*kubeAPI).String(), *kubeUser, *kubePass, *kubeSec, lb, *timeout, ctx)
 	if er != nil {
 		logger.Fatalf(er.Error())
 	}
 
-	if er := ng.Start(*resync); er != nil {
+	if er := ng.Start(*selector, *resync); er != nil {
 		logger.Fatalf(er.Error())
 	}
 

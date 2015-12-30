@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -37,15 +38,23 @@ var (
 	}
 )
 
-func NewClient(url, ver string, insecure bool) (*unversioned.Client, error) {
-	config, er := getKubeConfig(url, insecure)
+func NewClient(url, user, pass string, insecure bool) (*unversioned.Client, error) {
+	config, er := getKubeConfig(url, user, pass, insecure)
 	if er != nil {
 		return nil, er
 	}
 	return unversioned.New(config)
 }
 
-func getKubeConfig(url string, insecure bool) (*unversioned.Config, error) {
+func NewExtensionsClient(url, user, pass string, insecure bool) (*unversioned.ExtensionsClient, error) {
+	config, er := getKubeConfig(url, user, pass, insecure)
+	if er != nil {
+		return nil, er
+	}
+	return unversioned.NewExtensions(config)
+}
+
+func getKubeConfig(url, user, pass string, insecure bool) (*unversioned.Config, error) {
 	config, er := unversioned.InClusterConfig()
 	if er != nil {
 		config, er = clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
@@ -59,6 +68,8 @@ func getKubeConfig(url string, insecure bool) (*unversioned.Config, error) {
 	}
 
 	config.Insecure = insecure
+	config.Username = user
+	config.Password = pass
 	return config, nil
 }
 
@@ -66,69 +77,107 @@ func getKubeConfig(url string, insecure bool) (*unversioned.Config, error) {
 // 	FakeKubeClient = &testclient.Fake{}
 // }
 
-func Status(client unversioned.Interface) error {
-	_, er := client.ServerVersion()
+func Status(client *Client) error {
+	if _, er := client.Client.ServerVersion(); er != nil {
+		return er
+	}
+	_, er := client.ExtensionsClient.ServerVersion()
 	return er
 }
 
-func getID(m api.ObjectMeta) string {
-	return strings.Join([]string{m.Namespace, m.Name}, ".")
+// func GetID(port intstr.IntOrString, m api.ObjectMeta) string {
+// 	id := []string{m.Namespace, m.Name}
+// 	if port.Type == intstr.String {
+// 		id = append(id, port.String())
+// 	}
+// 	return strings.Join(id, ".")
+// }
+
+func GetSrvID(u *url.URL, m api.ObjectMeta) string {
+	id := []string{m.Namespace, m.Name, util.Hashf(md5.New(), u, m.UID)[:hashLen]}
+	return strings.Join(id, ".")
 }
 
-func getSrvID(u *url.URL, m api.ObjectMeta) string {
-	return strings.Join([]string{m.Namespace, m.Name, util.Hashf(md5.New(), u, m.UID)[:hashLen]}, ".")
-}
-
-func CreateStore(kind string, c cache.Getter, resync time.Duration, ctx context.Context) (cache.Store, error) {
+func CreateStore(kind string, c cache.Getter, sel Selector, resync time.Duration, ctx context.Context) (cache.Store, error) {
 	obj, ok := resources[kind]
 	if !ok {
 		return nil, fmt.Errorf("Object type %q not supported", kind)
 	}
 
 	store := cache.NewTTLStore(framework.DeletionHandlingMetaNamespaceKeyFunc, cacheTTL)
-	// selector := selectorFromMap(sel)
-	lw := getListWatch(kind, c, labels.Everything())
+	selector := selectorFromMap(sel)
+	lw := getListWatch(kind, c, selector)
 	cache.NewReflector(lw, obj, store, resync).RunUntil(ctx.Done())
 	return store, nil
 }
 
-func CreateController(kind string, w watcher, c cache.Getter, resync time.Duration) (cache.Store, *framework.Controller) {
+func CreateUpdateController(kind string, w watcher, c cache.Getter, sel Selector, resync time.Duration) (cache.Store, *framework.Controller) {
 	obj, ok := resources[kind]
 	if !ok {
 		return nil, nil
 	}
 
-	// sl := selectorFromMap(sel)
+	sl := selectorFromMap(sel)
+	handler := framework.ResourceEventHandlerFuncs{
+		DeleteFunc: w.Delete,
+		UpdateFunc: w.Update,
+	}
+	return framework.NewInformer(getListWatch(kind, c, sl), obj, resync, handler)
+}
+
+func CreateFullController(kind string, w watcher, c cache.Getter, sel Selector, resync time.Duration) (cache.Store, *framework.Controller) {
+	obj, ok := resources[kind]
+	if !ok {
+		return nil, nil
+	}
+
+	sl := selectorFromMap(sel)
 	handler := framework.ResourceEventHandlerFuncs{
 		AddFunc:    w.Add,
 		DeleteFunc: w.Delete,
 		UpdateFunc: w.Update,
 	}
-	return framework.NewInformer(getListWatch(kind, c, labels.Everything()), obj, resync, handler)
+	return framework.NewInformer(getListWatch(kind, c, sl), obj, resync, handler)
 }
 
 func getListWatch(kind string, get cache.Getter, selector labels.Selector) *cache.ListWatch {
 	return &cache.ListWatch{
 		ListFunc: func() (runtime.Object, error) {
-			return get.Get().Namespace(api.NamespaceAll).Resource(kind).
-				LabelsSelectorParam(selector).FieldsSelectorParam(fields.Everything()).
-				Do().Get()
+			logger.Debugf("Running ListFunc for %q", kind)
+			req := get.Get().Namespace(api.NamespaceAll).Resource(kind).
+				LabelsSelectorParam(selector).FieldsSelectorParam(fields.Everything())
+			logger.Debugf("Request URL: %v", req.URL())
+			obj, er := req.Do().Get()
+			if er != nil {
+				logger.Debugf("Got error: %v", er)
+			}
+			return obj, er
 		},
 		WatchFunc: func(options uapi.ListOptions) (watch.Interface, error) {
-			return get.Get().Prefix("watch").Namespace(api.NamespaceAll).Resource(kind).
+			logger.Debugf("Running WatchFunc for %q", kind)
+			req := get.Get().Prefix("watch").Namespace(api.NamespaceAll).Resource(kind).
 				LabelsSelectorParam(selector).FieldsSelectorParam(fields.Everything()).
-				Param("resourceVersion", options.ResourceVersion).Watch()
+				Param("resourceVersion", options.ResourceVersion)
+			logger.Debugf("Request URL: %v", req.URL())
+			w, er := req.Watch()
+			if er != nil {
+				logger.Debugf("Got error: %v", er)
+			} else {
+				logger.Debugf("Set watch for %q", kind)
+			}
+			return w, er
 		},
 	}
 }
 
-func selectorFromMap(m map[string]string) labels.Selector {
+func selectorFromMap(m Selector) labels.Selector {
 	s := labels.Everything()
-	for k, v := range m {
+	for k, val := range m {
+		key := k
 		if !strings.HasPrefix(k, Keyspace) {
-			k = strings.Join([]string{Keyspace, k}, "")
+			key = strings.Join([]string{Keyspace, k}, "")
 		}
-		s = s.Add(k, labels.DoubleEqualsOperator, []string{v})
+		s = s.Add(key, labels.DoubleEqualsOperator, []string{val})
 	}
 	return s
 }
@@ -141,40 +190,54 @@ func ServicesFromIngress(store *KubeCache, in *extensions.Ingress) []*Service {
 	)
 
 	list = []*Service{}
+	namespace := in.Namespace
 	if in.Spec.Backend != nil {
-		meta := &api.ObjectMeta{Name: in.Spec.Backend.ServiceName, Namespace: in.Namespace}
-		if s, er = store.GetService(meta); er != nil {
-			logger.Errorf("Unable to find default service %v: %v", KubeService(*s), er)
+		name := in.Spec.Backend.ServiceName
+		if s, er = store.GetService(namespace, name); er != nil {
+			logger.Errorf("Unable to find default service '%s/%s': %v", namespace, name, er)
 		} else {
-			svc := newService(in.Spec.Backend.ServicePort, s)
-			svc.Annotations = mergeAnnotations(in.Annotations, s.Annotations)
-			list = append(list, svc)
+			id := ServiceID(s.ObjectMeta, in.Spec.Backend.ServicePort)
+			svc := NewService(id, s.ObjectMeta)
+			if er := AddBackendsFromService(in.Spec.Backend.ServicePort, s, svc); er == nil {
+				svc.Annotations = mergeAnnotations(in.Annotations, s.Annotations)
+				list = append(list, svc)
+			} else {
+				logger.Warnf(er.Error())
+			}
 		}
 	}
 
 	for _, rule := range in.Spec.Rules {
 		for _, node := range rule.HTTP.Paths {
-			meta := &api.ObjectMeta{Name: node.Backend.ServiceName, Namespace: in.Namespace}
-			if s, er = store.GetService(meta); er != nil {
-				logger.Errorf("Unable to find service %v: %v", KubeService(*s), er)
+			name := node.Backend.ServiceName
+			if s, er = store.GetService(namespace, name); er != nil {
+				logger.Errorf("Unable to find service '%s/%s': %v", namespace, name, er)
 			} else {
-				svc := newService(node.Backend.ServicePort, s)
-				svc.Annotations = mergeAnnotations(in.Annotations, s.Annotations)
-				svc.Host, svc.Path = rule.Host, node.Path
-				list = append(list, svc)
+				id := ServiceID(s.ObjectMeta, node.Backend.ServicePort)
+				svc := NewService(id, s.ObjectMeta)
+				if er := AddBackendsFromService(node.Backend.ServicePort, s, svc); er == nil {
+					svc.Annotations = mergeAnnotations(in.Annotations, s.Annotations)
+					svc.Route.AddHost(rule.Host)
+					svc.Route.AddPath(node.Path)
+					list = append(list, svc)
+				} else {
+					logger.Warnf(er.Error())
+				}
 			}
 		}
 	}
+	Sort(list, nil)
 	return list
 }
 
-func (k *KubeCache) GetService(o interface{}) (*api.Service, error) {
-	obj, ok, er := k.Service.Get(o)
+func (k *KubeCache) GetService(namespace, name string) (*api.Service, error) {
+	key := cacheLookupKey(namespace, name)
+	obj, ok, er := k.Service.Get(key)
 	if er != nil {
 		return nil, er
 	}
 	if !ok {
-		return nil, nil
+		return nil, fmt.Errorf("Could not find Service %q", key)
 	}
 	s, ok := obj.(*api.Service)
 	if !ok {
@@ -183,24 +246,36 @@ func (k *KubeCache) GetService(o interface{}) (*api.Service, error) {
 	return s, nil
 }
 
-func (s *Service) SetBackend(port intstr.IntOrString, backend *api.Service) {
-	ur := ""
-	for _, sp := range backend.Spec.Ports {
-		if sp.Name == port.String() || sp.Port == port.IntValue() {
-			ur = fmt.Sprintf("http://%s:%d", backend.Spec.ClusterIP, sp.Port)
-		}
+func (s *Service) AddBackend(id, scheme, ip string, port int) {
+	if s.Backends == nil {
+		s.Backends = make([]*Server, 0, 1)
 	}
-	u, _ := url.Parse(ur)
-	s.SrvID = getSrvID(u, backend.ObjectMeta)
-	s.Backend = u
+
+	server := &Server{id, scheme, ip, port}
+	logger.Debugf("[%v] Adding %v", server)
+	s.Backends = append(s.Backends, server)
 }
 
 func (s *Service) GetAnnotation(key string) (val string, ok bool) {
 	if !strings.HasPrefix(key, Keyspace) {
-		key = strings.Join([]string{Keyspace, key}, "/")
+		key = strings.Join([]string{Keyspace, strings.TrimLeft(key, "/")}, "/")
 	}
+	logger.Debugf("[%v] Looking up annotation key=%q", key)
 	val, ok = s.Annotations[key]
 	return
+}
+
+func AddBackendsFromService(port intstr.IntOrString, backend *api.Service, service *Service) error {
+	logger.Debugf(`[%v] Look up Port("%v") in %v`, service, port, KubeService(*backend))
+	for _, sp := range backend.Spec.Ports {
+		logger.Debugf(`Checking Port(name="%s", port=%d)`, sp.Name, sp.Port)
+		if sp.Name == port.String() || sp.Port == port.IntValue() {
+			id := ServerID(backend.Spec.ClusterIP, sp.Port, backend.ObjectMeta)
+			service.AddBackend(id, HTTP, backend.Spec.ClusterIP, sp.Port)
+			return nil
+		}
+	}
+	return fmt.Errorf("%v matches no ports in %v", port, KubeService(*backend))
 }
 
 const (
@@ -210,14 +285,53 @@ const (
 	ServiceKind  = "service"
 	ServicesKind = "services"
 	IngressKind  = "ingresses"
+
+	HTTP  = "http"
+	HTTPS = "https"
 )
+
+func Sort(services []*Service, fn func(s1, s2 *Service) bool) {
+	sortFn := fn
+	if sortFn == nil {
+		sortFn = func(s1, s2 *Service) bool {
+			return s1.ID < s2.ID
+		}
+	}
+	sort.Sort(&serviceSorter{
+		services: services,
+		sorter:   sortFn,
+	})
+}
+
+func (s *serviceSorter) Len() int {
+	return len(s.services)
+}
+func (s *serviceSorter) Swap(i, j int) {
+	s.services[i], s.services[j] = s.services[j], s.services[i]
+}
+func (s *serviceSorter) Less(i, j int) bool {
+	return s.sorter(s.services[i], s.services[j])
+}
 
 func ServiceReady(s *api.Service) bool {
 	return s.Spec.Type == api.ServiceTypeClusterIP && api.IsServiceIPSet(s)
 }
 
-func (r Route) Empty() bool {
-	return r.Host == "" && r.Path == "" && r.Method == "" && (r.Headers == nil || len(r.Headers) == 0)
+func (r *Route) Empty() bool {
+	return len(r.Parts) < 1 && len(r.Header) < 1
+}
+
+func ServiceID(m api.ObjectMeta, port ...intstr.IntOrString) string {
+	id := []string{m.Namespace, m.Name}
+	if len(port) > 0 && port[0].Type == intstr.String {
+		id = append(id, port[0].String())
+	}
+	return strings.Join(id, ".")
+}
+
+func ServerID(ip string, port int, m api.ObjectMeta) string {
+	id := []string{m.Namespace, m.Name, util.Hashf(md5.New(), ip, port, m.UID)[:hashLen]}
+	return strings.Join(id, ".")
 }
 
 func mergeAnnotations(defaultMap, overrideMap map[string]string) map[string]string {
@@ -232,4 +346,12 @@ func mergeAnnotations(defaultMap, overrideMap map[string]string) map[string]stri
 		}
 	}
 	return out
+}
+
+func cacheLookupKey(namespace, name string) cache.ExplicitKey {
+	if namespace == "" {
+		return cache.ExplicitKey(name)
+	}
+	k := fmt.Sprintf("%s/%s", namespace, name)
+	return cache.ExplicitKey(k)
 }
