@@ -288,7 +288,7 @@ func (e *Engine) updateFrontend(old, next *extensions.Ingress) error {
 
 	del := []*kubernetes.Service{}
 	for _, s2 := range add {
-		if s1, ok := oldSVCmap[s2.ID]; ok && s1.ID != s2.ID {
+		if s1, ok := oldSVCmap[s2.ID]; !ok {
 			del = append(del, s1)
 		}
 	}
