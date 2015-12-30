@@ -99,7 +99,7 @@ func (v *Vulcan) NewMiddlewares(svc *kubernetes.Service) ([]loadbalancer.Middlew
 			case "trace":
 				re := regexp.MustCompile(`\s+`)
 				list, er := json.Marshal(strings.Split(re.ReplaceAllString(val, ""), ","))
-				if er != nil {
+				if er != nil || string(list) == "" {
 					logger.Warnf("Unable to json-ify trace headers: %v", er)
 					list = []byte("[]")
 				}
