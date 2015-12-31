@@ -25,7 +25,7 @@ help:
 
 dep-save:
 	@echo "==> Saving dependencies to ./Godeps"
-	godep save -t -v -d ./...
+	@godep save -t -v ./...
 
 dep-restore:
 	@echo "==> Restoring dependencies from ./Godeps"
