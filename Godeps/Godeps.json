@@ -264,7 +264,7 @@
 		},
 		{
 			"ImportPath": "github.com/timelinelabs/pkg/store",
-			"Rev": "52baf257f1b90ed2f42d96ae9284c837730a9c7a"
+			"Rev": "39d6a0813bf64858e412b83471025ca2f3d4f9ac"
 		},
 		{
 			"ImportPath": "github.com/timelinelabs/vulcand/anomaly",
