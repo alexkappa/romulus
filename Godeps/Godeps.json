@@ -86,9 +86,9 @@
 			"Rev": "38303597452719fe4942c45a03783a9299235e1b"
 		},
 		{
-			"ImportPath": "github.com/docker/go-units",
-			"Comment": "v0.1.0-21-g0bbddae",
-			"Rev": "0bbddae09c5a5419a8c6dcdd7ff90da3d450393b"
+			"ImportPath": "github.com/docker/docker/pkg/units",
+			"Comment": "v1.4.1-7755-g3830359",
+			"Rev": "38303597452719fe4942c45a03783a9299235e1b"
 		},
 		{
 			"ImportPath": "github.com/emicklei/go-restful",
@@ -221,18 +221,18 @@
 		},
 		{
 			"ImportPath": "github.com/opencontainers/runc/libcontainer/cgroups",
-			"Comment": "v0.0.6-19-gd97d5e8",
-			"Rev": "d97d5e8b007e4657316eed76ea30bc0f690230cf"
+			"Comment": "v0.0.5-13-g7695a0d",
+			"Rev": "7695a0ddb0c173de975dd90cf407bc76aeac64f7"
 		},
 		{
 			"ImportPath": "github.com/opencontainers/runc/libcontainer/configs",
-			"Comment": "v0.0.6-19-gd97d5e8",
-			"Rev": "d97d5e8b007e4657316eed76ea30bc0f690230cf"
+			"Comment": "v0.0.5-13-g7695a0d",
+			"Rev": "7695a0ddb0c173de975dd90cf407bc76aeac64f7"
 		},
 		{
 			"ImportPath": "github.com/opencontainers/runc/libcontainer/system",
-			"Comment": "v0.0.6-19-gd97d5e8",
-			"Rev": "d97d5e8b007e4657316eed76ea30bc0f690230cf"
+			"Comment": "v0.0.5-13-g7695a0d",
+			"Rev": "7695a0ddb0c173de975dd90cf407bc76aeac64f7"
 		},
 		{
 			"ImportPath": "github.com/pborman/uuid",
@@ -283,32 +283,32 @@
 		},
 		{
 			"ImportPath": "github.com/timelinelabs/vulcand/anomaly",
-			"Comment": "v0.8.0-beta.3-88-g814cc75",
-			"Rev": "814cc754bb9a98cf5cf07dada734dee2b2ebbb4c"
+			"Comment": "v0.8.0-beta.3-95-g56997a6",
+			"Rev": "56997a6d5c0812d734c45ba4f78cb4b89781ae98"
 		},
 		{
 			"ImportPath": "github.com/timelinelabs/vulcand/api",
-			"Comment": "v0.8.0-beta.3-88-g814cc75",
-			"Rev": "814cc754bb9a98cf5cf07dada734dee2b2ebbb4c"
+			"Comment": "v0.8.0-beta.3-95-g56997a6",
+			"Rev": "56997a6d5c0812d734c45ba4f78cb4b89781ae98"
 		},
 		{
 			"ImportPath": "github.com/timelinelabs/vulcand/engine",
-			"Comment": "v0.8.0-beta.3-88-g814cc75",
-			"Rev": "814cc754bb9a98cf5cf07dada734dee2b2ebbb4c"
+			"Comment": "v0.8.0-beta.3-95-g56997a6",
+			"Rev": "56997a6d5c0812d734c45ba4f78cb4b89781ae98"
 		},
 		{
 			"ImportPath": "github.com/timelinelabs/vulcand/plugin",
-			"Comment": "v0.8.0-beta.3-88-g814cc75",
-			"Rev": "814cc754bb9a98cf5cf07dada734dee2b2ebbb4c"
+			"Comment": "v0.8.0-beta.3-95-g56997a6",
+			"Rev": "56997a6d5c0812d734c45ba4f78cb4b89781ae98"
 		},
 		{
 			"ImportPath": "github.com/timelinelabs/vulcand/router",
-			"Comment": "v0.8.0-beta.3-88-g814cc75",
-			"Rev": "814cc754bb9a98cf5cf07dada734dee2b2ebbb4c"
+			"Comment": "v0.8.0-beta.3-95-g56997a6",
+			"Rev": "56997a6d5c0812d734c45ba4f78cb4b89781ae98"
 		},
 		{
 			"ImportPath": "github.com/ugorji/go/codec",
-			"Rev": "3f41379a4bdd0906316978f4f99166fdbe960be4"
+			"Rev": "646ae4a518c1c3be0739df898118d9bccf993858"
 		},
 		{
 			"ImportPath": "github.com/vulcand/oxy/memmetrics",
@@ -328,11 +328,11 @@
 		},
 		{
 			"ImportPath": "golang.org/x/crypto/curve25519",
-			"Rev": "f18420efc3b4f8e9f3d51f6bd2476e92c46260e9"
+			"Rev": "552e9d568fde9701ea1944fb01c8aadaceaa7353"
 		},
 		{
 			"ImportPath": "golang.org/x/crypto/ssh",
-			"Rev": "f18420efc3b4f8e9f3d51f6bd2476e92c46260e9"
+			"Rev": "552e9d568fde9701ea1944fb01c8aadaceaa7353"
 		},
 		{
 			"ImportPath": "golang.org/x/net/context",
