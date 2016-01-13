@@ -40,11 +40,25 @@ func New(prefix string, peers []string, timeout time.Duration, ctx context.Conte
 	if er != nil {
 		return nil, er
 	}
-	return &traefik{
+	t := &traefik{
 		prefix:  prefix,
 		Context: ctx,
 		Store:   Store{etcd},
-	}, nil
+	}
+	if er := t.Status(); er != nil {
+		return nil, er
+	}
+	if keys, er := t.GetMultiMap(prefix); er != nil {
+		frontends := path.Join(prefix, "frontends")
+		backends := path.Join(prefix, "backends")
+		if _, ok := keys[frontends]; !ok {
+			t.Set(frontends, []byte(""), 0)
+		}
+		if _, ok := keys[backends]; !ok {
+			t.Set(backends, []byte(""), 0)
+		}
+	}
+	return t, nil
 }
 
 func (t *traefik) Kind() string {
