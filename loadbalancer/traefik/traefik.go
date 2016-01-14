@@ -124,6 +124,7 @@ func (t *traefik) DeleteFrontend(fr loadbalancer.Frontend) error {
 
 func (t *traefik) NewBackend(svc *kubernetes.Service) (loadbalancer.Backend, error) {
 	b := new(types.Backend)
+	b.Servers = make(map[string]types.Server)
 	if lbm, ok := svc.GetAnnotation(loadbalancingMethod); ok {
 		b.LoadBalancer = &types.LoadBalancer{Method: lbm}
 	}
