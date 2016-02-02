@@ -9,12 +9,12 @@ import (
 
 	"github.com/albertrdixon/gearbox/logger"
 	"github.com/albertrdixon/gearbox/url"
-	"github.com/timelinelabs/vulcand/api"
-	"github.com/timelinelabs/vulcand/engine"
-	"github.com/timelinelabs/vulcand/plugin"
-	"github.com/timelinelabs/vulcand/plugin/registry"
+	"github.com/alexkappa/vulcand/registry"
 	"github.com/vulcand/oxy/utils"
 	"github.com/vulcand/route"
+	"github.com/vulcand/vulcand/api"
+	"github.com/vulcand/vulcand/engine"
+	"github.com/vulcand/vulcand/plugin"
 	"golang.org/x/net/context"
 )
 
@@ -76,7 +76,7 @@ func newVulcanLB(vulcanURL string, reg *plugin.Registry, ctx context.Context) (*
 	}
 
 	if reg == nil {
-		reg = registry.GetRegistry()
+		reg, _ = registry.GetRegistry()
 	}
 	client := api.NewClient(vulcanURL, reg)
 	if client == nil {

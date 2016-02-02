@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/albertrdixon/gearbox/logger"
-	"github.com/timelinelabs/vulcand/plugin/registry"
+	"github.com/alexkappa/vulcand/registry"
 	"golang.org/x/net/context"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
@@ -67,7 +67,8 @@ func getLBProvider(kind string, c context.Context) (LoadBalancer, error) {
 	default:
 		return nil, errors.New("Unknown LB type")
 	case "vulcand":
-		lb, er := newVulcanLB((*vulcanAPI).String(), registry.GetRegistry(), c)
+		r, _ := registry.GetRegistry()
+		lb, er := newVulcanLB((*vulcanAPI).String(), r, c)
 		if er != nil {
 			return nil, er
 		}
