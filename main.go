@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/albertrdixon/gearbox/logger"
-	"github.com/timelinelabs/romulus/kubernetes"
-	"github.com/timelinelabs/romulus/loadbalancer"
-	"github.com/timelinelabs/romulus/loadbalancer/traefik"
-	"github.com/timelinelabs/romulus/loadbalancer/vulcand"
+	"github.com/alexkappa/romulus/kubernetes"
+	"github.com/alexkappa/romulus/loadbalancer"
+	"github.com/alexkappa/romulus/loadbalancer/traefik"
+	"github.com/alexkappa/romulus/loadbalancer/vulcand"
 	"golang.org/x/net/context"
 	"gopkg.in/alecthomas/kingpin.v2"
 )

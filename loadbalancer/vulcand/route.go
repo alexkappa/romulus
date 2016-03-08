@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/timelinelabs/romulus/kubernetes"
+	"github.com/alexkappa/romulus/kubernetes"
 )
 
 func NewRoute(rt *kubernetes.Route) *route {

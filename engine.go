@@ -11,8 +11,8 @@ import (
 
 	"golang.org/x/net/context"
 
-	"github.com/timelinelabs/romulus/kubernetes"
-	"github.com/timelinelabs/romulus/loadbalancer"
+	"github.com/alexkappa/romulus/kubernetes"
+	"github.com/alexkappa/romulus/loadbalancer"
 )
 
 func NewEngine(kubeapi, user, pass string, insecure bool, lb loadbalancer.LoadBalancer, timeout time.Duration, ctx context.Context) (*Engine, error) {

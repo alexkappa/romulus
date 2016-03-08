@@ -10,9 +10,9 @@ import (
 
 	"github.com/albertrdixon/gearbox/ezd"
 	"github.com/albertrdixon/gearbox/logger"
+	"github.com/alexkappa/romulus/kubernetes"
+	"github.com/alexkappa/romulus/loadbalancer"
 	"github.com/emilevauge/traefik/types"
-	"github.com/timelinelabs/romulus/kubernetes"
-	"github.com/timelinelabs/romulus/loadbalancer"
 )
 
 var (

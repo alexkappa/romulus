@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/alexkappa/romulus/kubernetes"
 	"github.com/emilevauge/traefik/types"
-	"github.com/timelinelabs/romulus/kubernetes"
 )
 
 func NewRoute(rt *kubernetes.Route) map[string]types.Route {

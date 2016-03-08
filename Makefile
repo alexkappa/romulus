@@ -1,8 +1,8 @@
 REV ?= $$(git rev-parse --short=8 HEAD)
 BRANCH ?= $$(git rev-parse --abbrev-ref HEAD | tr / _)
 EXECUTABLE = romulusd
-IMAGE = romulusd
-REMOTE_REPO = quay.io/timeline_labs/romulusd
+IMAGE = docker.yieldr.com/romulusd
+REMOTE_REPO = docker.yieldr.com/romulusd
 LDFLAGS = "-s -X main.SHA=$(REV)"
 TEST_COMMAND = godep go test
 

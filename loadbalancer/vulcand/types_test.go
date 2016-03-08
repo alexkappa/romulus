@@ -3,8 +3,8 @@ package vulcand
 import (
 	"testing"
 
+	"github.com/alexkappa/romulus/loadbalancer"
 	"github.com/stretchr/testify/assert"
-	"github.com/timelinelabs/romulus/loadbalancer"
 )
 
 func TestInterface(t *testing.T) {

@@ -3,8 +3,8 @@ package vulcand
 import (
 	"testing"
 
+	"github.com/alexkappa/romulus/kubernetes"
 	"github.com/stretchr/testify/assert"
-	"github.com/timelinelabs/romulus/kubernetes"
 	vroute "github.com/vulcand/route"
 )
 

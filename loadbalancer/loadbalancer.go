@@ -3,7 +3,7 @@ package loadbalancer
 import (
 	"errors"
 
-	"github.com/timelinelabs/romulus/kubernetes"
+	"github.com/alexkappa/romulus/kubernetes"
 )
 
 var (

@@ -1,8 +1,8 @@
 package vulcand
 
 import (
-	"github.com/timelinelabs/vulcand/api"
-	"github.com/timelinelabs/vulcand/engine"
+	"github.com/vulcand/vulcand/api"
+	"github.com/vulcand/vulcand/engine"
 	"golang.org/x/net/context"
 )
 

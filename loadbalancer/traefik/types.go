@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/albertrdixon/gearbox/ezd"
+	"github.com/alexkappa/romulus/loadbalancer"
 	"github.com/emilevauge/traefik/types"
-	"github.com/timelinelabs/romulus/loadbalancer"
 	"golang.org/x/net/context"
 )
 
